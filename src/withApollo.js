@@ -77,10 +77,13 @@ const initApolloClient = (apolloClient, initialState, ctx) => {
  * to a next.js Page or AppTree.
  * @param  {Object} withApolloOptions
  * @param  {Boolean} [withApolloOptions.ssr=false]
+ * @param  {Boolean} [withApolloOptions.ssg=false]
  * @returns {(PageComponent: ReactNode) => ReactNode}
  */
 export default (ac) => {
-  return ({ ssr = false } = {}) => (PageComponent) => {
+  return ({ ssr = false, ssg = false } = {}) => (PageComponent) => {
+    const isServerRendered = ssr || ssg;
+    const getPropsOnServer = PageComponent.getInitialProps || PageComponent.getServerSideProps || PageComponent.getStaticProps;
     const WithApollo = ({ apolloClient, apolloState, ...pageProps }) => {
       let client;
       if (apolloClient) {
@@ -105,15 +108,15 @@ export default (ac) => {
       WithApollo.displayName = `withApollo(${displayName})`;
     }
 
-    if (ssr || PageComponent.getInitialProps) {
-      WithApollo.getInitialProps = async (ctx) => {
+    if (isServerRendered || getPropsOnServer) {
+      const getPropsOnServerWithApollo = async (ctx) => {
         const inAppContext = Boolean(ctx.ctx);
         const { apolloClient } = initOnContext(ac, ctx);
 
         // Run wrapped getInitialProps methods
         let pageProps = {};
-        if (PageComponent.getInitialProps) {
-          pageProps = await PageComponent.getInitialProps(ctx);
+        if (getPropsOnServer) {
+          pageProps = await getPropsOnServer(ctx);
         } else if (inAppContext) {
           pageProps = await App.getInitialProps(ctx);
         }
@@ -128,7 +131,7 @@ export default (ac) => {
           }
 
           // Only if dataFromTree is enabled
-          if (ssr && AppTree) {
+          if (isServerRendered && AppTree) {
             try {
               // Import `@apollo/react-ssr` dynamically.
               // We don't want to have this in our client bundle.
@@ -160,6 +163,15 @@ export default (ac) => {
             // head side effect therefore need to be cleared manually
             Head.rewind();
           }
+        }
+
+        // assign wrapper function to appropriate server side renderer function
+        if (PageComponent.getInitialProps) {
+          WithApollo.getInitialProps = getPropsOnServerWithApollo;
+        } else if (PageComponent.getServerSideProps) {
+          WithApollo.getServerSideProps = getPropsOnServerWithApollo;
+        } else if (PageComponent.getStaticProps) {
+          WithApollo.getStaticProps = getPropsOnServerWithApollo;
         }
 
         return {
